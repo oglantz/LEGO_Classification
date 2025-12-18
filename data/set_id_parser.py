@@ -7,6 +7,7 @@ THEME_NAME = "Speed Champions"
 THEMES_FILE = "../files/themes.csv"
 SETS_FILE = "../files/sets.csv"
 
+
 # Set the output file path
 OUTPUT_FILE = "../files/speed_champions_set_ids.txt"
 
