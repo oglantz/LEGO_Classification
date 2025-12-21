@@ -9,7 +9,7 @@ SETS_FILE = "../files/sets.csv"
 
 
 # Set the output file path
-OUTPUT_FILE = "../files/speed_champions_set_ids.txt"
+OUTPUT_FILE = "../files/" + THEME_NAME + "_set_ids.txt"
 
 
 def find_theme_id(theme_name, themes_file):
