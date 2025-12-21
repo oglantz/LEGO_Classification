@@ -1,0 +1,49 @@
+# Default configuration for LEGO Piece Detection System
+
+segmentation:
+  backend: "sam"  # Options: "sam", "fastsam"
+  model_type: "vit_b"  # For SAM: "vit_b" | "vit_l" | "vit_h" ; For FastSAM: "FastSAM-x" | "FastSAM-s"
+  model_path: "models/segmentation/sam_vit_b_01ec64.pth" # Absolute path recommended on Windows
+  points_per_side: 32  # Number of points per side for automatic mask generation
+  pred_iou_thresh: 0.88  # IoU threshold for filtering masks (0-1, higher = stricter)
+  stability_score_thresh: 0.95  # Stability score threshold (0-1, higher = stricter)
+  min_mask_area: 100  # Minimum mask area in pixels
+  overlap_threshold: 0.7  # IoU threshold for merging overlapping masks
+
+classification:
+  model_name: "resnet50"  # Model architecture
+  num_classes: 1000  # Number of LEGO part classes (top N most common)
+  top_k: 5  # Number of top predictions to return
+  confidence_threshold: 0.3  # Minimum confidence threshold
+  checkpoint_path: null  # Path to trained model checkpoint (null = use dummy/pretrained)
+
+postprocessing:
+  aspect_ratio_tolerance: 0.3  # Tolerance for aspect ratio matching
+  area_tolerance: 0.5  # Tolerance for area matching
+  stud_count_weight: 0.2  # Weight for stud count heuristic
+
+data:
+  dataset_name: "pvrancx/legobricks"  # HuggingFace dataset name
+  image_size: 224  # Input image size for classification
+  batch_size: 32  # Batch size for training
+
+training:
+  epochs: 50  # Number of training epochs
+  learning_rate: 0.001  # Initial learning rate
+  weight_decay: 0.0001  # Weight decay for optimizer
+  mixed_precision: true  # Use mixed precision training (FP16)
+  checkpoint_dir: "models/classification"  # Directory for checkpoints
+  log_dir: "logs"  # Directory for TensorBoard logs
+  early_stopping_patience: 10  # Patience for early stopping
+
+visualization:
+  font_size: 16  # Font size for labels
+  mask_alpha: 0.4  # Transparency for mask overlay (0-1)
+  show_boxes: true  # Show bounding boxes
+  show_labels: true  # Show labels
+  show_confidences: true  # Show confidence scores
+
+device:
+  use_cuda: true  # Prefer CUDA if available
+  seed: 42  # Random seed for reproducibility
+

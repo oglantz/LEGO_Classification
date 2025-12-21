@@ -1,0 +1,33 @@
+# Core PyTorch
+torch>=2.0.0
+torchvision>=0.15.0
+
+# FastSAM for segmentation
+# Note: FastSAM may need to be installed separately
+# pip install fastsam
+# Or install from source: https://github.com/CASIA-IVA-Lab/FastSAM
+# fastsam>=0.1.0 **Installed separately**
+
+# HuggingFace datasets
+datasets>=2.14.0
+transformers>=4.30.0
+
+# Image processing
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Configuration
+PyYAML>=6.0
+
+# Logging and monitoring
+tensorboard>=2.13.0
+tqdm>=4.65.0
+
+# Utilities
+requests>=2.31.0
+
+ultralytics<8.1.0

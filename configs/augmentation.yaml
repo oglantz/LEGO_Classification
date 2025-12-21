@@ -1,0 +1,31 @@
+# Augmentation configuration for training
+
+# Color augmentations
+brightness: 0.2  # Brightness jitter range
+contrast: 0.2  # Contrast jitter range
+saturation: 0.2  # Saturation jitter range
+hue: 0.1  # Hue jitter range
+
+# Geometric augmentations
+rotation: 15  # Rotation range in degrees
+translate: [0.1, 0.1]  # Translation range (x, y) as fraction of image size
+
+# Image quality augmentations
+blur: true  # Apply random blur
+blur_probability: 0.3  # Probability of applying blur
+blur_kernel_size: 3  # Gaussian blur kernel size
+blur_sigma: [0.1, 2.0]  # Blur sigma range
+
+# Noise augmentations (future)
+noise: false  # Apply random noise
+noise_probability: 0.2
+noise_std: 0.05
+
+# Background augmentations (future)
+random_background: false  # Use random backgrounds
+background_textures: []  # List of background texture paths
+
+# Domain adaptation augmentations
+white_balance_shift: false  # Simulate white balance variations
+shadow_simulation: false  # Add shadow effects
+
