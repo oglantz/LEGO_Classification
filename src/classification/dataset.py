@@ -92,21 +92,23 @@ class LEGODataset(Dataset):
         Returns:
             Tuple of (label_to_idx, idx_to_label) dictionaries
         """
-        # Extract all labels
-        all_labels = []
-        for item in self.dataset:
-            # Handle different possible label field names
-            label = None
-            for field in ['label', 'class', 'part_id', 'part_num', 'id']:
-                if field in item:
-                    label = item[field]
-                    break
-            
-            if label is not None:
-                all_labels.append(str(label))
+        # Find the label column name
+        self._label_field = None
+        for field in ['label', 'class', 'part_id', 'part_num', 'id']:
+            if field in self.dataset.column_names:
+                self._label_field = field
+                break
+        
+        if self._label_field is None:
+            raise ValueError(f"Could not find label column. Available columns: {self.dataset.column_names}")
+        
+        # Extract all labels directly from the column (without loading images!)
+        print(f"Extracting labels from column '{self._label_field}'...")
+        all_labels = [str(label) for label in self.dataset[self._label_field]]
         
         # Count label frequencies
         label_counts = Counter(all_labels)
+        print(f"Found {len(label_counts)} unique classes")
         
         # Select classes
         if class_ids is not None:
@@ -118,6 +120,9 @@ class LEGODataset(Dataset):
         else:
             selected_labels = list(label_counts.keys())
         
+        # Store all_labels for use in _filter_by_classes
+        self._all_labels = all_labels
+        
         # Create mapping to contiguous indices
         label_to_idx = {label: idx for idx, label in enumerate(sorted(selected_labels))}
         idx_to_label = {idx: label for label, idx in label_to_idx.items()}
@@ -126,18 +131,14 @@ class LEGODataset(Dataset):
     
     def _filter_by_classes(self) -> List[int]:
         """Filter dataset indices to only include selected classes."""
-        filtered = []
+        # Use cached labels from _process_labels (avoids re-iterating dataset)
+        filtered = [
+            idx for idx, label in enumerate(self._all_labels)
+            if label in self.label_to_idx
+        ]
         
-        for idx, item in enumerate(self.dataset):
-            # Get label
-            label = None
-            for field in ['label', 'class', 'part_id', 'part_num', 'id']:
-                if field in item:
-                    label = str(item[field])
-                    break
-            
-            if label is not None and label in self.label_to_idx:
-                filtered.append(idx)
+        # Clean up the cached labels to free memory
+        del self._all_labels
         
         return filtered
     
@@ -240,15 +241,11 @@ class LEGODataset(Dataset):
         # Apply transforms
         image_tensor = self.transform(image)
         
-        # Get label
-        label = None
-        for field in ['label', 'class', 'part_id', 'part_num', 'id']:
-            if field in item:
-                label = str(item[field])
-                break
+        # Get label using cached field name
+        label = str(item[self._label_field])
         
-        if label is None or label not in self.label_to_idx:
-            raise ValueError(f"Invalid label for item at index {dataset_idx}")
+        if label not in self.label_to_idx:
+            raise ValueError(f"Invalid label '{label}' for item at index {dataset_idx}")
         
         label_idx = self.label_to_idx[label]
         

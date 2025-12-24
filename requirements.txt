@@ -1,4 +1,7 @@
 # Core PyTorch
+# IMPORTANT: For GPU support, install PyTorch with CUDA BEFORE running pip install -r requirements.txt:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+# The lines below will only install if not already present (for CPU fallback)
 torch>=2.0.0
 torchvision>=0.15.0
 

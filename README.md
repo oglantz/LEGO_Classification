@@ -63,7 +63,8 @@ ozl/
 ### Prerequisites
 
 - Python 3.8+
-- CUDA-capable GPU (optional, CPU fallback available)
+- CUDA-capable GPU (recommended for training, CPU fallback available)
+- NVIDIA drivers installed (check with `nvidia-smi`)
 - ~10GB disk space for models and datasets
 
 ### Installation
@@ -73,12 +74,41 @@ ozl/
 cd ozl
 ```
 
-2. **Install dependencies**:
+2. **Install PyTorch with CUDA support** (recommended for GPU acceleration):
+
+First, check your CUDA version:
+```bash
+nvidia-smi
+```
+
+Then install PyTorch with the appropriate CUDA version:
+
+**For CUDA 12.x (most modern GPUs):**
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+**For CUDA 11.8:**
+```bash
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+**CPU only (not recommended for training):**
+```bash
+pip install torch torchvision torchaudio
+```
+
+Verify CUDA is available:
+```bash
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+```
+
+3. **Install other dependencies**:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **Install FastSAM** (if not already installed):
+4. **Install FastSAM** (if not already installed):
 ```bash
 pip install fastsam
 ```
@@ -94,6 +124,8 @@ pip install -e .
 ```bash
 python scripts/download_weights.py --model-type FastSAM-x
 ```
+
+> **Note**: Training on CPU is extremely slow (~10 seconds per batch). GPU acceleration is strongly recommended for training.
 
 ## Quick Start
 
@@ -293,6 +325,25 @@ To reduce manual labeling:
 pip install fastsam
 # Or download weights manually
 python scripts/download_weights.py
+```
+
+### CUDA not available / Training on CPU
+If you see "CUDA not available, falling back to CPU", PyTorch was installed without CUDA support.
+
+1. Check your GPU and CUDA version:
+```bash
+nvidia-smi
+```
+
+2. Check current PyTorch installation:
+```bash
+python -c "import torch; print(torch.__version__); print(f'CUDA: {torch.cuda.is_available()}')"
+```
+
+3. If it shows `+cpu` in the version, reinstall with CUDA:
+```bash
+pip uninstall torch torchvision torchaudio -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 ```
 
 ### CUDA out of memory
