@@ -25,10 +25,10 @@ postprocessing:
 data:
   dataset_name: "pvrancx/legobricks"  # HuggingFace dataset name
   image_size: 224  # Input image size for classification
-  batch_size: 768  # Batch size for training
+  batch_size: 32  # Batch size for training
   splits_dir: "data/splits/legobricks" # Directory containing pre-computed splits (local)
   # splits_dir: "/content/gdrive/MyDrive/data/splits/legobricks/legobricks" # Directory containing pre-computed splits (Google Drive)
-  num_workers: 16  # Dataloader workers (increase on A100/Pro)
+  num_workers: 8  # Dataloader workers (increase on A100/Pro)
   prefetch_factor: 4  # Batches prefetched per worker (effective if num_workers > 0)
 
 training:
@@ -36,12 +36,6 @@ training:
   learning_rate: 0.001  # Initial learning rate
   weight_decay: 0.0001  # Weight decay for optimizer
   mixed_precision: true  # Use mixed precision training (FP16)
-  allow_tf32: true  # Enable TF32 on A100 (faster matmuls/convs)
-  use_bf16: true  # Prefer BF16 autocast on A100 (instead of FP16)
-  use_channels_last: true  # Use channels_last memory format for conv nets
-  compile_model: false  # Use torch.compile for potential speedups (adds warmup time)
-  tqdm_mininterval: 1.0  # Seconds between tqdm refreshes
-  tqdm_miniters: 10  # Minimum iterations between refreshes
   checkpoint_dir: "models/classification"  # Directory for checkpoints
   log_dir: "logs"  # Directory for TensorBoard logs
   early_stopping_patience: 10  # Patience for early stopping
