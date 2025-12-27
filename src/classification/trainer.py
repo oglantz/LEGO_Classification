@@ -29,7 +29,6 @@ class Trainer:
         learning_rate: float = 0.001,
         weight_decay: float = 0.0001,
         mixed_precision: bool = True,
-        grad_accum_steps: int = 1,
         checkpoint_dir: str = "models/classification",
         log_dir: str = "logs",
         early_stopping_patience: int = 10,
@@ -48,22 +47,13 @@ class Trainer:
             checkpoint_dir: Directory to save checkpoints
             log_dir: Directory for TensorBoard logs
             early_stopping_patience: Patience for early stopping
-            grad_accum_steps: Number of micro-batches to accumulate before optimizer step
         """
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device if device is not None else get_device()
         self.mixed_precision = mixed_precision and torch.cuda.is_available()
-        self.grad_accum_steps = max(1, grad_accum_steps)
 
-        # Enable TF32 on Ampere+ for faster matmul/convs
-        try:
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-        except Exception:
-            pass
-        
         # Enable cuDNN autotuner for faster convolutions on fixed-size inputs
         try:
             torch.backends.cudnn.benchmark = True
@@ -72,8 +62,6 @@ class Trainer:
         
         # Move model to device
         self.model = self.model.to(self.device)
-        # Use channels_last for better tensor cores memory access
-        self.model = self.model.to(memory_format=torch.channels_last)
         
         # Setup optimizer
         self.optimizer = optim.AdamW(
@@ -91,17 +79,11 @@ class Trainer:
         # Setup loss function
         self.criterion = nn.CrossEntropyLoss()
         
-        # Setup mixed precision dtype and scaler
-        self.autocast_dtype = torch.float32
+        # Setup mixed precision scaler
         self.scaler = None
         if self.mixed_precision:
-            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-                self.autocast_dtype = torch.bfloat16
-                print("Using mixed precision training (BF16)")
-            else:
-                self.autocast_dtype = torch.float16
-                self.scaler = torch.cuda.amp.GradScaler()
-                print("Using mixed precision training (FP16)")
+            self.scaler = torch.cuda.amp.GradScaler()
+            print("Using mixed precision training")
         
         # Setup checkpointing
         self.checkpoint_dir = Path(checkpoint_dir)
@@ -134,41 +116,29 @@ class Trainer:
         total = 0
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {self.current_epoch + 1}")
-        self.optimizer.zero_grad(set_to_none=True)
-
+        
         for batch_idx, (images, labels) in enumerate(pbar):
-            images = images.to(self.device, non_blocking=True).to(memory_format=torch.channels_last)
+            images = images.to(self.device, non_blocking=True)
             labels = labels.to(self.device, non_blocking=True)
+            
+            # Zero gradients
+            self.optimizer.zero_grad()
             
             # Forward pass
             if self.mixed_precision:
-                with torch.cuda.amp.autocast(dtype=self.autocast_dtype):
+                with torch.cuda.amp.autocast():
                     outputs = self.model(images)
                     loss = self.criterion(outputs, labels)
                 
                 # Backward pass
-                scaled_loss = loss / self.grad_accum_steps
-                if self.scaler is not None:
-                    self.scaler.scale(scaled_loss).backward()
-                else:
-                    scaled_loss.backward()
-
-                # Optimizer step every grad_accum_steps or on last batch
-                if ((batch_idx + 1) % self.grad_accum_steps == 0) or ((batch_idx + 1) == len(self.train_loader)):
-                    if self.scaler is not None:
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
-                    else:
-                        self.optimizer.step()
-                    self.optimizer.zero_grad(set_to_none=True)
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
             else:
                 outputs = self.model(images)
                 loss = self.criterion(outputs, labels)
-                (loss / self.grad_accum_steps).backward()
-
-                if ((batch_idx + 1) % self.grad_accum_steps == 0) or ((batch_idx + 1) == len(self.train_loader)):
-                    self.optimizer.step()
-                    self.optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                self.optimizer.step()
             
             # Statistics
             running_loss += loss.item()
@@ -214,11 +184,11 @@ class Trainer:
         
         with torch.no_grad():
             for images, labels in tqdm(self.val_loader, desc="Validation"):
-                images = images.to(self.device, non_blocking=True).to(memory_format=torch.channels_last)
+                images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
                 
                 if self.mixed_precision:
-                    with torch.cuda.amp.autocast(dtype=self.autocast_dtype):
+                    with torch.cuda.amp.autocast():
                         outputs = self.model(images)
                         loss = self.criterion(outputs, labels)
                 else:
@@ -240,13 +210,9 @@ class Trainer:
         top5_correct = 0
         with torch.no_grad():
             for images, labels in self.val_loader:
-                images = images.to(self.device, non_blocking=True).to(memory_format=torch.channels_last)
+                images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
-                if self.mixed_precision:
-                    with torch.cuda.amp.autocast(dtype=self.autocast_dtype):
-                        outputs = self.model(images)
-                else:
-                    outputs = self.model(images)
+                outputs = self.model(images)
                 _, top5_preds = torch.topk(outputs, 5, dim=1)
                 top5_correct += sum([labels[i] in top5_preds[i] for i in range(len(labels))])
         

@@ -7,7 +7,6 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -109,8 +108,6 @@ def train_classifier(
         num_classes=num_classes,
         pretrained=True,  # Use ImageNet pretrained weights
     )
-    # Prefer channels_last for better performance on A100
-    model = model.to(memory_format=torch.channels_last)
     print(f"Model created with {num_classes} classes")
     
     # Get training configuration
@@ -118,7 +115,6 @@ def train_classifier(
     learning_rate = get_config_value(train_config, "learning_rate", 0.001)
     weight_decay = get_config_value(train_config, "weight_decay", 0.0001)
     mixed_precision = get_config_value(train_config, "mixed_precision", True)
-    grad_accum_steps = get_config_value(train_config, "grad_accum_steps", 1)
     checkpoint_dir = get_config_value(train_config, "checkpoint_dir", "models/classification")
     log_dir = get_config_value(train_config, "log_dir", "logs")
     early_stopping_patience = get_config_value(train_config, "early_stopping_patience", 10)
@@ -134,7 +130,6 @@ def train_classifier(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         mixed_precision=mixed_precision,
-        grad_accum_steps=grad_accum_steps,
         checkpoint_dir=checkpoint_dir,
         log_dir=log_dir,
         early_stopping_patience=early_stopping_patience,
@@ -147,14 +142,6 @@ def train_classifier(
     # Final test evaluation (optional, only if test split is available)
     if 'test_loader' in locals() and test_loader is not None:
         print("\nEvaluating on test set...")
-        # Enable TF32 globally
-        try:
-            torch.backends.cuda.matmul.allow_tf32 = True
-            torch.backends.cudnn.allow_tf32 = True
-        except Exception:
-            pass
-
-        use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
         model.eval()
         criterion = nn.CrossEntropyLoss()
         total = 0
@@ -164,14 +151,10 @@ def train_classifier(
 
         with torch.no_grad():
             for images, labels in test_loader:
-                images = images.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+                images = images.to(device)
                 labels = labels.to(device)
-                if use_bf16:
-                    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                        outputs = model(images)
-                else:
-                    with torch.cuda.amp.autocast():
-                        outputs = model(images)
+
+                outputs = model(images)
                 loss = criterion(outputs, labels)
                 running_loss += loss.item()
 
