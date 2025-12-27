@@ -153,10 +153,11 @@ def train_classifier(
 
         with torch.no_grad():
             for images, labels in test_loader:
-                images = images.to(device)
-                labels = labels.to(device)
+                images = images.to(device, non_blocking=True).to(memory_format=torch.channels_last)
+                labels = labels.to(device, non_blocking=True)
 
-                outputs = model(images)
+                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                    outputs = model(images)
                 loss = criterion(outputs, labels)
                 running_loss += loss.item()
 
