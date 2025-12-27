@@ -29,6 +29,7 @@ class Trainer:
         learning_rate: float = 0.001,
         weight_decay: float = 0.0001,
         mixed_precision: bool = True,
+        grad_accum_steps: int = 1,
         checkpoint_dir: str = "models/classification",
         log_dir: str = "logs",
         early_stopping_patience: int = 10,
@@ -47,12 +48,14 @@ class Trainer:
             checkpoint_dir: Directory to save checkpoints
             log_dir: Directory for TensorBoard logs
             early_stopping_patience: Patience for early stopping
+            grad_accum_steps: Number of micro-batches to accumulate before optimizer step
         """
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device if device is not None else get_device()
         self.mixed_precision = mixed_precision and torch.cuda.is_available()
+        self.grad_accum_steps = max(1, grad_accum_steps)
 
         # Enable cuDNN autotuner for faster convolutions on fixed-size inputs
         try:
@@ -116,13 +119,11 @@ class Trainer:
         total = 0
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {self.current_epoch + 1}")
-        
+        self.optimizer.zero_grad(set_to_none=True)
+
         for batch_idx, (images, labels) in enumerate(pbar):
             images = images.to(self.device, non_blocking=True)
             labels = labels.to(self.device, non_blocking=True)
-            
-            # Zero gradients
-            self.optimizer.zero_grad()
             
             # Forward pass
             if self.mixed_precision:
@@ -131,14 +132,22 @@ class Trainer:
                     loss = self.criterion(outputs, labels)
                 
                 # Backward pass
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+                scaled_loss = loss / self.grad_accum_steps
+                self.scaler.scale(scaled_loss).backward()
+
+                # Optimizer step every grad_accum_steps or on last batch
+                if ((batch_idx + 1) % self.grad_accum_steps == 0) or ((batch_idx + 1) == len(self.train_loader)):
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    self.optimizer.zero_grad(set_to_none=True)
             else:
                 outputs = self.model(images)
                 loss = self.criterion(outputs, labels)
-                loss.backward()
-                self.optimizer.step()
+                (loss / self.grad_accum_steps).backward()
+
+                if ((batch_idx + 1) % self.grad_accum_steps == 0) or ((batch_idx + 1) == len(self.train_loader)):
+                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
             
             # Statistics
             running_loss += loss.item()

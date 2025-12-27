@@ -25,17 +25,18 @@ postprocessing:
 data:
   dataset_name: "pvrancx/legobricks"  # HuggingFace dataset name
   image_size: 224  # Input image size for classification
-  batch_size: 32  # Batch size for training
+  batch_size: 256  # Batch size for training
   splits_dir: "data/splits/legobricks" # Directory containing pre-computed splits (local)
   # splits_dir: "/content/gdrive/MyDrive/data/splits/legobricks/legobricks" # Directory containing pre-computed splits (Google Drive)
-  num_workers: 8  # Dataloader workers (increase on A100/Pro)
-  prefetch_factor: 4  # Batches prefetched per worker (effective if num_workers > 0)
+  num_workers: 16  # Dataloader workers (increase on A100/Pro)
+  prefetch_factor: 6  # Batches prefetched per worker (effective if num_workers > 0)
 
 training:
   epochs: 50  # Number of training epochs
   learning_rate: 0.001  # Initial learning rate
   weight_decay: 0.0001  # Weight decay for optimizer
   mixed_precision: true  # Use mixed precision training (FP16)
+  grad_accum_steps: 3  # Number of micro-batches to accumulate before optimizer step
   checkpoint_dir: "models/classification"  # Directory for checkpoints
   log_dir: "logs"  # Directory for TensorBoard logs
   early_stopping_patience: 10  # Patience for early stopping

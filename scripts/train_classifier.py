@@ -115,6 +115,7 @@ def train_classifier(
     learning_rate = get_config_value(train_config, "learning_rate", 0.001)
     weight_decay = get_config_value(train_config, "weight_decay", 0.0001)
     mixed_precision = get_config_value(train_config, "mixed_precision", True)
+    grad_accum_steps = get_config_value(train_config, "grad_accum_steps", 1)
     checkpoint_dir = get_config_value(train_config, "checkpoint_dir", "models/classification")
     log_dir = get_config_value(train_config, "log_dir", "logs")
     early_stopping_patience = get_config_value(train_config, "early_stopping_patience", 10)
@@ -130,6 +131,7 @@ def train_classifier(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         mixed_precision=mixed_precision,
+        grad_accum_steps=grad_accum_steps,
         checkpoint_dir=checkpoint_dir,
         log_dir=log_dir,
         early_stopping_patience=early_stopping_patience,
