@@ -26,7 +26,8 @@ data:
   dataset_name: "pvrancx/legobricks"  # HuggingFace dataset name
   image_size: 224  # Input image size for classification
   batch_size: 32  # Batch size for training
-  splits_dir: "data/splits/legobricks" # Directory containing pre-computed splits
+  # splits_dir: "data/splits/legobricks" # Directory containing pre-computed splits (local)
+  splits_dir: "/content/gdrive/MyDrive/data/splits/legobricks/legobricks" # Directory containing pre-computed splits (Google Drive)
 
 training:
   epochs: 50  # Number of training epochs
