@@ -109,6 +109,10 @@ def train_classifier(
         traceback.print_exc()
         sys.exit(1)
     
+    # Read compile flag early (used during model creation)
+    _train_cfg_tmp = get_config_value(config, "training", {})
+    compile_model = get_config_value(_train_cfg_tmp, "compile_model", False)
+    
     # Create model
     print(f"\nCreating model...")
     model = LEGOClassifier(
