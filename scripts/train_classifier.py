@@ -52,6 +52,8 @@ def train_classifier(
     image_size = get_config_value(data_config, "image_size", 224)
     batch_size = get_config_value(data_config, "batch_size", 32)
     splits_dir = get_config_value(data_config, "splits_dir", None)
+    num_workers = get_config_value(data_config, "num_workers", 8)
+    prefetch_factor = get_config_value(data_config, "prefetch_factor", 4)
     
     # Get classification configuration
     cls_config = get_config_value(config, "classification", {})
@@ -72,7 +74,8 @@ def train_classifier(
                 dataset_path=splits_dir,
                 image_size=image_size,
                 batch_size=batch_size,
-                num_workers=4,
+                num_workers=num_workers,
+                prefetch_factor=prefetch_factor,
                 augment_config=aug_config,
             )
         else:
@@ -80,7 +83,8 @@ def train_classifier(
                 dataset_name=dataset_name,
                 image_size=image_size,
                 batch_size=batch_size,
-                num_workers=4,
+                num_workers=num_workers,
+                prefetch_factor=prefetch_factor,
                 top_n_classes=num_classes,
                 augment_config=aug_config,
             )

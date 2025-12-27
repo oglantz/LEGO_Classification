@@ -26,8 +26,10 @@ data:
   dataset_name: "pvrancx/legobricks"  # HuggingFace dataset name
   image_size: 224  # Input image size for classification
   batch_size: 32  # Batch size for training
-  # splits_dir: "data/splits/legobricks" # Directory containing pre-computed splits (local)
-  splits_dir: "/content/gdrive/MyDrive/data/splits/legobricks/legobricks" # Directory containing pre-computed splits (Google Drive)
+  splits_dir: "data/splits/legobricks" # Directory containing pre-computed splits (local)
+  # splits_dir: "/content/gdrive/MyDrive/data/splits/legobricks/legobricks" # Directory containing pre-computed splits (Google Drive)
+  num_workers: 8  # Dataloader workers (increase on A100/Pro)
+  prefetch_factor: 4  # Batches prefetched per worker (effective if num_workers > 0)
 
 training:
   epochs: 50  # Number of training epochs

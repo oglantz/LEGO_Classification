@@ -53,6 +53,12 @@ class Trainer:
         self.val_loader = val_loader
         self.device = device if device is not None else get_device()
         self.mixed_precision = mixed_precision and torch.cuda.is_available()
+
+        # Enable cuDNN autotuner for faster convolutions on fixed-size inputs
+        try:
+            torch.backends.cudnn.benchmark = True
+        except Exception:
+            pass
         
         # Move model to device
         self.model = self.model.to(self.device)
@@ -112,8 +118,8 @@ class Trainer:
         pbar = tqdm(self.train_loader, desc=f"Epoch {self.current_epoch + 1}")
         
         for batch_idx, (images, labels) in enumerate(pbar):
-            images = images.to(self.device)
-            labels = labels.to(self.device)
+            images = images.to(self.device, non_blocking=True)
+            labels = labels.to(self.device, non_blocking=True)
             
             # Zero gradients
             self.optimizer.zero_grad()
@@ -178,8 +184,8 @@ class Trainer:
         
         with torch.no_grad():
             for images, labels in tqdm(self.val_loader, desc="Validation"):
-                images = images.to(self.device)
-                labels = labels.to(self.device)
+                images = images.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
                 
                 if self.mixed_precision:
                     with torch.cuda.amp.autocast():
@@ -204,8 +210,8 @@ class Trainer:
         top5_correct = 0
         with torch.no_grad():
             for images, labels in self.val_loader:
-                images = images.to(self.device)
-                labels = labels.to(self.device)
+                images = images.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
                 outputs = self.model(images)
                 _, top5_preds = torch.topk(outputs, 5, dim=1)
                 top5_correct += sum([labels[i] in top5_preds[i] for i in range(len(labels))])

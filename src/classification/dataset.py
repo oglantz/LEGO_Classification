@@ -271,6 +271,7 @@ def create_dataloaders(
     image_size: int = 224,
     batch_size: int = 32,
     num_workers: int = 4,
+    prefetch_factor: Optional[int] = None,
     top_n_classes: Optional[int] = None,
     augment_config: Optional[Dict] = None,
 ) -> Tuple[DataLoader, DataLoader, Optional[DataLoader]]:
@@ -282,6 +283,7 @@ def create_dataloaders(
         image_size: Target image size
         batch_size: Batch size
         num_workers: Number of data loading workers
+        prefetch_factor: Batches to prefetch per worker (only if num_workers > 0)
         top_n_classes: Use top N most common classes
         augment_config: Augmentation configuration
         
@@ -335,33 +337,37 @@ def create_dataloaders(
         print("Test split not available")
         test_dataset = None
     
+    # DataLoader common kwargs
+    common_kwargs: Dict = {
+        'batch_size': batch_size,
+        'num_workers': num_workers,
+        'pin_memory': True,
+        'persistent_workers': True if num_workers and num_workers > 0 else False,
+    }
+    if num_workers and num_workers > 0 and prefetch_factor is not None:
+        common_kwargs['prefetch_factor'] = prefetch_factor
+
     # Create dataloaders
     train_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True,
+        **common_kwargs,
     )
     
     val_loader = None
     if val_dataset is not None:
         val_loader = DataLoader(
             val_dataset,
-            batch_size=batch_size,
             shuffle=False,
-            num_workers=num_workers,
-            pin_memory=True,
+            **common_kwargs,
         )
     
     test_loader = None
     if test_dataset is not None:
         test_loader = DataLoader(
             test_dataset,
-            batch_size=batch_size,
             shuffle=False,
-            num_workers=num_workers,
-            pin_memory=True,
+            **common_kwargs,
         )
     
     return train_loader, val_loader, test_loader
@@ -372,6 +378,7 @@ def create_dataloaders_from_disk(
     image_size: int = 224,
     batch_size: int = 32,
     num_workers: int = 4,
+    prefetch_factor: Optional[int] = None,
     augment_config: Optional[Dict] = None,
 ) -> Tuple[DataLoader, Optional[DataLoader], Optional[DataLoader]]:
     """
@@ -382,6 +389,7 @@ def create_dataloaders_from_disk(
         image_size: Target image size
         batch_size: Batch size
         num_workers: Number of data loading workers
+        prefetch_factor: Batches to prefetch per worker (only if num_workers > 0)
         augment_config: Augmentation configuration
 
     Returns:
@@ -436,33 +444,37 @@ def create_dataloaders_from_disk(
             augment=False,
         )
 
+    # DataLoader common kwargs
+    common_kwargs: Dict = {
+        'batch_size': batch_size,
+        'num_workers': num_workers,
+        'pin_memory': True,
+        'persistent_workers': True if num_workers and num_workers > 0 else False,
+    }
+    if num_workers and num_workers > 0 and prefetch_factor is not None:
+        common_kwargs['prefetch_factor'] = prefetch_factor
+
     # DataLoaders
     train_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True,
+        **common_kwargs,
     )
 
     val_loader = None
     if val_dataset is not None:
         val_loader = DataLoader(
             val_dataset,
-            batch_size=batch_size,
             shuffle=False,
-            num_workers=num_workers,
-            pin_memory=True,
+            **common_kwargs,
         )
 
     test_loader = None
     if test_dataset is not None:
         test_loader = DataLoader(
             test_dataset,
-            batch_size=batch_size,
             shuffle=False,
-            num_workers=num_workers,
-            pin_memory=True,
+            **common_kwargs,
         )
 
     return train_loader, val_loader, test_loader
