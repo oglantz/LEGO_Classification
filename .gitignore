@@ -68,6 +68,10 @@ tensorboard/
 # Data
 data/raw/
 data/processed/
+
+# Custom dataset splits (saved via datasets.save_to_disk)
+data/splits/
+
 *.csv
 *.h5
 *.hdf5

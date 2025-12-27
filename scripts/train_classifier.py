@@ -4,12 +4,14 @@
 import argparse
 import sys
 from pathlib import Path
+import torch
+import torch.nn as nn
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.classification import LEGOClassifier, Trainer
-from src.classification.dataset import create_dataloaders
+from src.classification.dataset import create_dataloaders, create_dataloaders_from_disk
 from src.utils import load_config, get_config_value, get_device, set_seed
 
 
@@ -49,6 +51,7 @@ def train_classifier(
     dataset_name = get_config_value(data_config, "dataset_name", "pvrancx/legobricks")
     image_size = get_config_value(data_config, "image_size", 224)
     batch_size = get_config_value(data_config, "batch_size", 32)
+    splits_dir = get_config_value(data_config, "splits_dir", None)
     
     # Get classification configuration
     cls_config = get_config_value(config, "classification", {})
@@ -62,14 +65,25 @@ def train_classifier(
     print(f"Number of classes: {num_classes}")
     
     try:
-        train_loader, val_loader, test_loader = create_dataloaders(
-            dataset_name=dataset_name,
-            image_size=image_size,
-            batch_size=batch_size,
-            num_workers=4,
-            top_n_classes=num_classes,
-            augment_config=aug_config,
-        )
+        # Prefer custom splits if provided
+        if splits_dir is not None and Path(splits_dir).exists():
+            print(f"Loading custom splits from: {splits_dir}")
+            train_loader, val_loader, test_loader = create_dataloaders_from_disk(
+                dataset_path=splits_dir,
+                image_size=image_size,
+                batch_size=batch_size,
+                num_workers=4,
+                augment_config=aug_config,
+            )
+        else:
+            train_loader, val_loader, test_loader = create_dataloaders(
+                dataset_name=dataset_name,
+                image_size=image_size,
+                batch_size=batch_size,
+                num_workers=4,
+                top_n_classes=num_classes,
+                augment_config=aug_config,
+            )
         
         # Update num_classes from actual dataset
         actual_num_classes = train_loader.dataset.get_num_classes()
@@ -120,6 +134,39 @@ def train_classifier(
     # Train
     print(f"\nStarting training for {num_epochs} epochs...")
     trainer.train(num_epochs=num_epochs, resume_from=resume_from)
+
+    # Final test evaluation (optional, only if test split is available)
+    if 'test_loader' in locals() and test_loader is not None:
+        print("\nEvaluating on test set...")
+        model.eval()
+        criterion = nn.CrossEntropyLoss()
+        total = 0
+        correct = 0
+        running_loss = 0.0
+        top5_correct = 0
+
+        with torch.no_grad():
+            for images, labels in test_loader:
+                images = images.to(device)
+                labels = labels.to(device)
+
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+                running_loss += loss.item()
+
+                # Top-1 accuracy
+                _, preds = outputs.max(1)
+                total += labels.size(0)
+                correct += (preds == labels).sum().item()
+
+                # Top-5 accuracy
+                top5_indices = torch.topk(outputs, 5, dim=1).indices
+                top5_correct += top5_indices.eq(labels.view(-1, 1)).any(dim=1).sum().item()
+
+        test_loss = running_loss / len(test_loader)
+        test_acc = 100.0 * correct / total if total > 0 else 0.0
+        test_top5 = 100.0 * top5_correct / total if total > 0 else 0.0
+        print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%, Test Top-5: {test_top5:.2f}%")
     
     print("\n" + "=" * 60)
     print("Training completed!")

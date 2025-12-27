@@ -7,7 +7,7 @@ import numpy as np
 from typing import List, Optional, Dict, Tuple, Callable
 from collections import Counter
 import torchvision.transforms as transforms
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 import io
 
 
@@ -21,6 +21,7 @@ class LEGODataset(Dataset):
         dataset_name: str = "pvrancx/legobricks",
         split: str = "train",
         image_size: int = 224,
+        hf_dataset: Optional["Dataset"] = None,
         class_ids: Optional[List[int]] = None,
         top_n_classes: Optional[int] = None,
         augment: bool = False,
@@ -44,24 +45,29 @@ class LEGODataset(Dataset):
         self.augment = augment and (split == "train")
         
         # Load dataset
-        print(f"Loading dataset {dataset_name} (split: {split})...")
-        try:
-            self.dataset = load_dataset(dataset_name, split=split)
-        except Exception as e:
-            print(f"Failed to load dataset {dataset_name}: {e}")
-            print("Attempting to load with alternative configuration...")
+        if hf_dataset is not None:
+            # Use provided in-memory dataset (pre-split/filtered)
+            self.dataset = hf_dataset
+            print(f"Using provided dataset object (size: {len(self.dataset)}) for split '{split}'")
+        else:
+            print(f"Loading dataset {dataset_name} (split: {split})...")
             try:
-                # Try loading without split specification
-                full_dataset = load_dataset(dataset_name)
-                if split in full_dataset:
-                    self.dataset = full_dataset[split]
-                else:
-                    # Use train split as fallback
-                    available_splits = list(full_dataset.keys())
-                    print(f"Available splits: {available_splits}")
-                    self.dataset = full_dataset[available_splits[0]]
-            except Exception as e2:
-                raise RuntimeError(f"Failed to load dataset: {e2}")
+                self.dataset = load_dataset(dataset_name, split=split)
+            except Exception as e:
+                print(f"Failed to load dataset {dataset_name}: {e}")
+                print("Attempting to load with alternative configuration...")
+                try:
+                    # Try loading without split specification
+                    full_dataset = load_dataset(dataset_name)
+                    if split in full_dataset:
+                        self.dataset = full_dataset[split]
+                    else:
+                        # Use train split as fallback
+                        available_splits = list(full_dataset.keys())
+                        print(f"Available splits: {available_splits}")
+                        self.dataset = full_dataset[available_splits[0]]
+                except Exception as e2:
+                    raise RuntimeError(f"Failed to load dataset: {e2}")
         
         # Process labels
         self.label_to_idx, self.idx_to_label = self._process_labels(
@@ -358,5 +364,106 @@ def create_dataloaders(
             pin_memory=True,
         )
     
+    return train_loader, val_loader, test_loader
+
+
+def create_dataloaders_from_disk(
+    dataset_path: str,
+    image_size: int = 224,
+    batch_size: int = 32,
+    num_workers: int = 4,
+    augment_config: Optional[Dict] = None,
+) -> Tuple[DataLoader, Optional[DataLoader], Optional[DataLoader]]:
+    """
+    Create train/val/test dataloaders from a saved DatasetDict (load_from_disk).
+
+    Args:
+        dataset_path: Directory path passed to datasets.load_from_disk
+        image_size: Target image size
+        batch_size: Batch size
+        num_workers: Number of data loading workers
+        augment_config: Augmentation configuration
+
+    Returns:
+        Tuple of (train_loader, val_loader, test_loader)
+    """
+    print(f"Loading precomputed splits from: {dataset_path}")
+    dd = load_from_disk(dataset_path)
+
+    if 'train' not in dd:
+        raise ValueError(f"Expected 'train' split in dataset at {dataset_path}")
+
+    # Build train dataset first to define label mapping
+    train_dataset = LEGODataset(
+        dataset_name="from_disk",
+        split="train",
+        image_size=image_size,
+        hf_dataset=dd['train'],
+        augment=True,
+        augment_config=augment_config,
+    )
+
+    # Create val/test using the same class set as train
+    val_dataset = None
+    test_dataset = None
+
+    if 'validation' in dd:
+        val_dataset = LEGODataset(
+            dataset_name="from_disk",
+            split="validation",
+            image_size=image_size,
+            hf_dataset=dd['validation'],
+            class_ids=list(train_dataset.label_to_idx.keys()),
+            augment=False,
+        )
+    elif 'val' in dd:
+        val_dataset = LEGODataset(
+            dataset_name="from_disk",
+            split="val",
+            image_size=image_size,
+            hf_dataset=dd['val'],
+            class_ids=list(train_dataset.label_to_idx.keys()),
+            augment=False,
+        )
+
+    if 'test' in dd:
+        test_dataset = LEGODataset(
+            dataset_name="from_disk",
+            split="test",
+            image_size=image_size,
+            hf_dataset=dd['test'],
+            class_ids=list(train_dataset.label_to_idx.keys()),
+            augment=False,
+        )
+
+    # DataLoaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    val_loader = None
+    if val_dataset is not None:
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
+
+    test_loader = None
+    if test_dataset is not None:
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=True,
+        )
+
     return train_loader, val_loader, test_loader
 
