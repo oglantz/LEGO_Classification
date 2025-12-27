@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
+
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -54,7 +55,6 @@ def train_classifier(
     splits_dir = get_config_value(data_config, "splits_dir", None)
     num_workers = get_config_value(data_config, "num_workers", 8)
     prefetch_factor = get_config_value(data_config, "prefetch_factor", 4)
-    use_gpu_aug = get_config_value(data_config, "use_gpu_aug", False)
     
     # Get classification configuration
     cls_config = get_config_value(config, "classification", {})
@@ -77,7 +77,6 @@ def train_classifier(
                 batch_size=batch_size,
                 num_workers=num_workers,
                 prefetch_factor=prefetch_factor,
-                use_gpu_aug=use_gpu_aug,
                 augment_config=aug_config,
             )
         else:
@@ -87,7 +86,6 @@ def train_classifier(
                 batch_size=batch_size,
                 num_workers=num_workers,
                 prefetch_factor=prefetch_factor,
-                use_gpu_aug=use_gpu_aug,
                 top_n_classes=num_classes,
                 augment_config=aug_config,
             )
@@ -111,6 +109,8 @@ def train_classifier(
         num_classes=num_classes,
         pretrained=True,  # Use ImageNet pretrained weights
     )
+    # Prefer channels_last for better performance on A100
+    model = model.to(memory_format=torch.channels_last)
     print(f"Model created with {num_classes} classes")
     
     # Get training configuration
@@ -135,9 +135,6 @@ def train_classifier(
         weight_decay=weight_decay,
         mixed_precision=mixed_precision,
         grad_accum_steps=grad_accum_steps,
-        use_gpu_aug=use_gpu_aug,
-        image_size=image_size,
-        augment_config=aug_config,
         checkpoint_dir=checkpoint_dir,
         log_dir=log_dir,
         early_stopping_patience=early_stopping_patience,
@@ -150,6 +147,14 @@ def train_classifier(
     # Final test evaluation (optional, only if test split is available)
     if 'test_loader' in locals() and test_loader is not None:
         print("\nEvaluating on test set...")
+        # Enable TF32 globally
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
+
+        use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
         model.eval()
         criterion = nn.CrossEntropyLoss()
         total = 0
@@ -160,16 +165,13 @@ def train_classifier(
         with torch.no_grad():
             for images, labels in test_loader:
                 images = images.to(device, non_blocking=True).to(memory_format=torch.channels_last)
-                labels = labels.to(device, non_blocking=True)
-
-                # Normalize on GPU if we skipped CPU normalization
-                if use_gpu_aug:
-                    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
-                    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
-                    images = (images - mean) / std
-
-                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                    outputs = model(images)
+                labels = labels.to(device)
+                if use_bf16:
+                    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+                        outputs = model(images)
+                else:
+                    with torch.cuda.amp.autocast():
+                        outputs = model(images)
                 loss = criterion(outputs, labels)
                 running_loss += loss.item()
 

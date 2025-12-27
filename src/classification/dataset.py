@@ -22,7 +22,6 @@ class LEGODataset(Dataset):
         split: str = "train",
         image_size: int = 224,
         hf_dataset: Optional["Dataset"] = None,
-        use_gpu_aug: bool = False,
         class_ids: Optional[List[int]] = None,
         top_n_classes: Optional[int] = None,
         augment: bool = False,
@@ -44,7 +43,6 @@ class LEGODataset(Dataset):
         self.split = split
         self.image_size = image_size
         self.augment = augment and (split == "train")
-        self.use_gpu_aug = use_gpu_aug
         
         # Load dataset
         if hf_dataset is not None:
@@ -166,42 +164,38 @@ class LEGODataset(Dataset):
         transform_list = []
         
         if self.augment:
-            if not self.use_gpu_aug:
-                # Training augmentations on CPU
-                transform_list.extend([
-                    transforms.RandomResizedCrop(self.image_size, scale=(0.8, 1.0)),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.ColorJitter(
-                        brightness=augment_config.get('brightness', 0.2),
-                        contrast=augment_config.get('contrast', 0.2),
-                        saturation=augment_config.get('saturation', 0.2),
-                        hue=augment_config.get('hue', 0.1),
-                    ),
-                    transforms.RandomAffine(
-                        degrees=augment_config.get('rotation', 15),
-                        translate=(0.1, 0.1),
-                    ),
-                ])
-                if augment_config.get('blur', False):
-                    transform_list.append(transforms.RandomApply([
-                        transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))
-                    ], p=0.3))
-            # If using GPU augmentations, only convert to tensor here; crop/jitter/normalize on GPU
+            # Training augmentations
+            transform_list.extend([
+                transforms.RandomResizedCrop(self.image_size, scale=(0.8, 1.0)),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ColorJitter(
+                    brightness=augment_config.get('brightness', 0.2),
+                    contrast=augment_config.get('contrast', 0.2),
+                    saturation=augment_config.get('saturation', 0.2),
+                    hue=augment_config.get('hue', 0.1),
+                ),
+                transforms.RandomAffine(
+                    degrees=augment_config.get('rotation', 15),
+                    translate=(0.1, 0.1),
+                ),
+            ])
+            
+            # Add blur and noise if specified
+            if augment_config.get('blur', False):
+                transform_list.append(transforms.RandomApply([
+                    transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0))
+                ], p=0.3))
+            
+            # Random background (simulated with random crop variations)
         else:
             # Validation/test transforms
-            if not self.use_gpu_aug:
-                transform_list.append(transforms.Resize((self.image_size, self.image_size)))
-            else:
-                # Keep resize lightweight on CPU to reduce GPU work and H2D size
-                transform_list.append(transforms.Resize((self.image_size, self.image_size)))
+            transform_list.append(transforms.Resize((self.image_size, self.image_size)))
         
         # Common transforms
-        transform_list.append(transforms.ToTensor())
-        # Normalize on CPU only if not using GPU augmentations
-        if not self.use_gpu_aug:
-            transform_list.append(
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            )
+        transform_list.extend([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
         
         return transforms.Compose(transform_list)
     
@@ -278,7 +272,6 @@ def create_dataloaders(
     batch_size: int = 32,
     num_workers: int = 4,
     prefetch_factor: Optional[int] = None,
-    use_gpu_aug: bool = False,
     top_n_classes: Optional[int] = None,
     augment_config: Optional[Dict] = None,
 ) -> Tuple[DataLoader, DataLoader, Optional[DataLoader]]:
@@ -293,7 +286,6 @@ def create_dataloaders(
         prefetch_factor: Batches to prefetch per worker (only if num_workers > 0)
         top_n_classes: Use top N most common classes
         augment_config: Augmentation configuration
-        use_gpu_aug: Whether to perform augmentations and normalization on GPU
         
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
@@ -303,7 +295,6 @@ def create_dataloaders(
         dataset_name=dataset_name,
         split="train",
         image_size=image_size,
-        use_gpu_aug=use_gpu_aug,
         top_n_classes=top_n_classes,
         augment=True,
         augment_config=augment_config,
@@ -318,7 +309,6 @@ def create_dataloaders(
             dataset_name=dataset_name,
             split="validation",
             image_size=image_size,
-            use_gpu_aug=use_gpu_aug,
             class_ids=list(train_dataset.label_to_idx.keys()),
             augment=False,
         )
@@ -328,7 +318,6 @@ def create_dataloaders(
                 dataset_name=dataset_name,
                 split="val",
                 image_size=image_size,
-                use_gpu_aug=use_gpu_aug,
                 class_ids=list(train_dataset.label_to_idx.keys()),
                 augment=False,
             )
@@ -341,7 +330,6 @@ def create_dataloaders(
             dataset_name=dataset_name,
             split="test",
             image_size=image_size,
-            use_gpu_aug=use_gpu_aug,
             class_ids=list(train_dataset.label_to_idx.keys()),
             augment=False,
         )
@@ -391,7 +379,6 @@ def create_dataloaders_from_disk(
     batch_size: int = 32,
     num_workers: int = 4,
     prefetch_factor: Optional[int] = None,
-    use_gpu_aug: bool = False,
     augment_config: Optional[Dict] = None,
 ) -> Tuple[DataLoader, Optional[DataLoader], Optional[DataLoader]]:
     """
@@ -404,7 +391,6 @@ def create_dataloaders_from_disk(
         num_workers: Number of data loading workers
         prefetch_factor: Batches to prefetch per worker (only if num_workers > 0)
         augment_config: Augmentation configuration
-        use_gpu_aug: Whether to perform augmentations and normalization on GPU
 
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
@@ -421,7 +407,6 @@ def create_dataloaders_from_disk(
         split="train",
         image_size=image_size,
         hf_dataset=dd['train'],
-        use_gpu_aug=use_gpu_aug,
         augment=True,
         augment_config=augment_config,
     )
@@ -436,7 +421,6 @@ def create_dataloaders_from_disk(
             split="validation",
             image_size=image_size,
             hf_dataset=dd['validation'],
-            use_gpu_aug=use_gpu_aug,
             class_ids=list(train_dataset.label_to_idx.keys()),
             augment=False,
         )
@@ -446,7 +430,6 @@ def create_dataloaders_from_disk(
             split="val",
             image_size=image_size,
             hf_dataset=dd['val'],
-            use_gpu_aug=use_gpu_aug,
             class_ids=list(train_dataset.label_to_idx.keys()),
             augment=False,
         )
@@ -457,7 +440,6 @@ def create_dataloaders_from_disk(
             split="test",
             image_size=image_size,
             hf_dataset=dd['test'],
-            use_gpu_aug=use_gpu_aug,
             class_ids=list(train_dataset.label_to_idx.keys()),
             augment=False,
         )

@@ -11,11 +11,6 @@ import time
 from tqdm import tqdm
 import numpy as np
 
-try:
-    import kornia.augmentation as K
-except Exception:
-    K = None
-
 from .classifier import LEGOClassifier
 from ..utils.device_utils import get_device, set_seed
 
@@ -35,9 +30,6 @@ class Trainer:
         weight_decay: float = 0.0001,
         mixed_precision: bool = True,
         grad_accum_steps: int = 1,
-        use_gpu_aug: bool = False,
-        image_size: int = 224,
-        augment_config: Optional[Dict] = None,
         checkpoint_dir: str = "models/classification",
         log_dir: str = "logs",
         early_stopping_patience: int = 10,
@@ -57,9 +49,6 @@ class Trainer:
             log_dir: Directory for TensorBoard logs
             early_stopping_patience: Patience for early stopping
             grad_accum_steps: Number of micro-batches to accumulate before optimizer step
-            use_gpu_aug: Whether to apply augmentations/normalization on GPU
-            image_size: Target image size (used for GPU aug)
-            augment_config: Augmentation parameters
         """
         self.model = model
         self.train_loader = train_loader
@@ -67,25 +56,24 @@ class Trainer:
         self.device = device if device is not None else get_device()
         self.mixed_precision = mixed_precision and torch.cuda.is_available()
         self.grad_accum_steps = max(1, grad_accum_steps)
-        self.use_gpu_aug = use_gpu_aug
-        self.image_size = image_size
-        self.augment_config = augment_config or {}
 
-        # Enable TF32 for faster matmul/convolutions on Ampere+ (A100, etc.)
+        # Enable TF32 on Ampere+ for faster matmul/convs
         try:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
         except Exception:
             pass
-
+        
         # Enable cuDNN autotuner for faster convolutions on fixed-size inputs
         try:
             torch.backends.cudnn.benchmark = True
         except Exception:
             pass
         
-        # Move model to device and prefer channels_last for better memory access on Ampere
-        self.model = self.model.to(self.device).to(memory_format=torch.channels_last)
+        # Move model to device
+        self.model = self.model.to(self.device)
+        # Use channels_last for better tensor cores memory access
+        self.model = self.model.to(memory_format=torch.channels_last)
         
         # Setup optimizer
         self.optimizer = optim.AdamW(
@@ -103,24 +91,17 @@ class Trainer:
         # Setup loss function
         self.criterion = nn.CrossEntropyLoss()
         
-        # Setup mixed precision autocast/scaler
+        # Setup mixed precision dtype and scaler
+        self.autocast_dtype = torch.float32
         self.scaler = None
-        self.autocast_dtype = None
         if self.mixed_precision:
-            # Prefer bfloat16 on Ampere+; fall back to float16 with GradScaler
-            try:
-                capability = torch.cuda.get_device_capability(self.device)
-            except Exception:
-                capability = (0, 0)
-            use_bf16 = capability[0] >= 8  # Ampere or newer
-            if use_bf16:
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
                 self.autocast_dtype = torch.bfloat16
-                self.scaler = None  # Not needed for bf16
-                print("Using mixed precision training (bfloat16)")
+                print("Using mixed precision training (BF16)")
             else:
                 self.autocast_dtype = torch.float16
                 self.scaler = torch.cuda.amp.GradScaler()
-                print("Using mixed precision training (float16)")
+                print("Using mixed precision training (FP16)")
         
         # Setup checkpointing
         self.checkpoint_dir = Path(checkpoint_dir)
@@ -139,32 +120,6 @@ class Trainer:
         # Training state
         self.current_epoch = 0
         self.global_step = 0
-
-        # GPU augmentation pipelines
-        self.gpu_train_aug = None
-        self.gpu_norm = None
-        if self.use_gpu_aug:
-            if K is None:
-                raise ImportError("kornia is required for GPU augmentations. Install with `pip install kornia`.")
-            self.gpu_train_aug = torch.nn.Sequential(
-                K.RandomResizedCrop((self.image_size, self.image_size), scale=(0.8, 1.0)),
-                K.RandomHorizontalFlip(p=0.5),
-                K.ColorJitter(
-                    brightness=self.augment_config.get('brightness', 0.2),
-                    contrast=self.augment_config.get('contrast', 0.2),
-                    saturation=self.augment_config.get('saturation', 0.2),
-                    hue=self.augment_config.get('hue', 0.1),
-                ),
-                K.RandomAffine(
-                    degrees=self.augment_config.get('rotation', 15),
-                    translate=(0.1, 0.1),
-                ),
-                K.Normalize(mean=torch.tensor([0.485, 0.456, 0.406]), std=torch.tensor([0.229, 0.224, 0.225])),
-            ).to(self.device)
-            self.gpu_norm = K.Normalize(
-                mean=torch.tensor([0.485, 0.456, 0.406]),
-                std=torch.tensor([0.229, 0.224, 0.225])
-            ).to(self.device)
     
     def train_epoch(self) -> Dict[str, float]:
         """
@@ -188,9 +143,6 @@ class Trainer:
             # Forward pass
             if self.mixed_precision:
                 with torch.cuda.amp.autocast(dtype=self.autocast_dtype):
-                    # Apply GPU augmentations and normalization if enabled
-                    if self.use_gpu_aug and self.gpu_train_aug is not None:
-                        images = self.gpu_train_aug(images)
                     outputs = self.model(images)
                     loss = self.criterion(outputs, labels)
                 
@@ -198,20 +150,18 @@ class Trainer:
                 scaled_loss = loss / self.grad_accum_steps
                 if self.scaler is not None:
                     self.scaler.scale(scaled_loss).backward()
-                    # Optimizer step every grad_accum_steps or on last batch
-                    if ((batch_idx + 1) % self.grad_accum_steps == 0) or ((batch_idx + 1) == len(self.train_loader)):
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
-                        self.optimizer.zero_grad(set_to_none=True)
                 else:
                     scaled_loss.backward()
-                    if ((batch_idx + 1) % self.grad_accum_steps == 0) or ((batch_idx + 1) == len(self.train_loader)):
+
+                # Optimizer step every grad_accum_steps or on last batch
+                if ((batch_idx + 1) % self.grad_accum_steps == 0) or ((batch_idx + 1) == len(self.train_loader)):
+                    if self.scaler is not None:
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
                         self.optimizer.step()
-                        self.optimizer.zero_grad(set_to_none=True)
+                    self.optimizer.zero_grad(set_to_none=True)
             else:
-                # Apply GPU augmentations and normalization if enabled
-                if self.use_gpu_aug and self.gpu_train_aug is not None:
-                    images = self.gpu_train_aug(images)
                 outputs = self.model(images)
                 loss = self.criterion(outputs, labels)
                 (loss / self.grad_accum_steps).backward()
@@ -269,13 +219,9 @@ class Trainer:
                 
                 if self.mixed_precision:
                     with torch.cuda.amp.autocast(dtype=self.autocast_dtype):
-                        if self.use_gpu_aug and self.gpu_norm is not None:
-                            images = self.gpu_norm(images)
                         outputs = self.model(images)
                         loss = self.criterion(outputs, labels)
                 else:
-                    if self.use_gpu_aug and self.gpu_norm is not None:
-                        images = self.gpu_norm(images)
                     outputs = self.model(images)
                     loss = self.criterion(outputs, labels)
                 
@@ -296,9 +242,11 @@ class Trainer:
             for images, labels in self.val_loader:
                 images = images.to(self.device, non_blocking=True).to(memory_format=torch.channels_last)
                 labels = labels.to(self.device, non_blocking=True)
-                if self.use_gpu_aug and self.gpu_norm is not None:
-                    images = self.gpu_norm(images)
-                outputs = self.model(images)
+                if self.mixed_precision:
+                    with torch.cuda.amp.autocast(dtype=self.autocast_dtype):
+                        outputs = self.model(images)
+                else:
+                    outputs = self.model(images)
                 _, top5_preds = torch.topk(outputs, 5, dim=1)
                 top5_correct += sum([labels[i] in top5_preds[i] for i in range(len(labels))])
         
