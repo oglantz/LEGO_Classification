@@ -18,6 +18,7 @@ transformers>=4.30.0
 # Image processing
 opencv-python>=4.8.0
 Pillow>=10.0.0
+kornia>=0.7.1
 
 # Scientific computing
 numpy

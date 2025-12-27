@@ -54,6 +54,7 @@ def train_classifier(
     splits_dir = get_config_value(data_config, "splits_dir", None)
     num_workers = get_config_value(data_config, "num_workers", 8)
     prefetch_factor = get_config_value(data_config, "prefetch_factor", 4)
+    use_gpu_aug = get_config_value(data_config, "use_gpu_aug", False)
     
     # Get classification configuration
     cls_config = get_config_value(config, "classification", {})
@@ -76,6 +77,7 @@ def train_classifier(
                 batch_size=batch_size,
                 num_workers=num_workers,
                 prefetch_factor=prefetch_factor,
+                use_gpu_aug=use_gpu_aug,
                 augment_config=aug_config,
             )
         else:
@@ -85,6 +87,7 @@ def train_classifier(
                 batch_size=batch_size,
                 num_workers=num_workers,
                 prefetch_factor=prefetch_factor,
+                use_gpu_aug=use_gpu_aug,
                 top_n_classes=num_classes,
                 augment_config=aug_config,
             )
@@ -132,6 +135,9 @@ def train_classifier(
         weight_decay=weight_decay,
         mixed_precision=mixed_precision,
         grad_accum_steps=grad_accum_steps,
+        use_gpu_aug=use_gpu_aug,
+        image_size=image_size,
+        augment_config=aug_config,
         checkpoint_dir=checkpoint_dir,
         log_dir=log_dir,
         early_stopping_patience=early_stopping_patience,
@@ -155,6 +161,12 @@ def train_classifier(
             for images, labels in test_loader:
                 images = images.to(device, non_blocking=True).to(memory_format=torch.channels_last)
                 labels = labels.to(device, non_blocking=True)
+
+                # Normalize on GPU if we skipped CPU normalization
+                if use_gpu_aug:
+                    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
+                    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+                    images = (images - mean) / std
 
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16):
                     outputs = model(images)

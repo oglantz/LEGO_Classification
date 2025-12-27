@@ -30,6 +30,7 @@ data:
   # splits_dir: "/content/gdrive/MyDrive/data/splits/legobricks/legobricks" # Directory containing pre-computed splits (Google Drive)
   num_workers: 20  # Dataloader workers (increase on A100/Pro)
   prefetch_factor: 6  # Batches prefetched per worker (effective if num_workers > 0)
+  use_gpu_aug: true  # Use Kornia GPU augmentations and normalization
 
 training:
   epochs: 50  # Number of training epochs
