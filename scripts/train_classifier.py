@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 import torch
 import torch.nn as nn
+import os
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -45,6 +46,12 @@ def train_classifier(
     device = get_device(use_cuda=use_cuda)
     seed = get_config_value(config, "device.seed", 42)
     set_seed(seed)
+    # Reduce CPU thread contention on Colab
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    try:
+        torch.set_num_threads(1)
+    except Exception:
+        pass
     
     # Get data configuration
     data_config = get_config_value(config, "data", {})
@@ -108,6 +115,12 @@ def train_classifier(
         num_classes=num_classes,
         pretrained=True,  # Use ImageNet pretrained weights
     )
+    if compile_model:
+        try:
+            model = torch.compile(model)
+            print("Compiled model with torch.compile")
+        except Exception as e:
+            print(f"torch.compile unavailable or failed: {e}")
     print(f"Model created with {num_classes} classes")
     
     # Get training configuration
@@ -115,6 +128,12 @@ def train_classifier(
     learning_rate = get_config_value(train_config, "learning_rate", 0.001)
     weight_decay = get_config_value(train_config, "weight_decay", 0.0001)
     mixed_precision = get_config_value(train_config, "mixed_precision", True)
+    allow_tf32 = get_config_value(train_config, "allow_tf32", True)
+    use_bf16 = get_config_value(train_config, "use_bf16", True)
+    use_channels_last = get_config_value(train_config, "use_channels_last", True)
+    compile_model = get_config_value(train_config, "compile_model", False)
+    tqdm_mininterval = get_config_value(train_config, "tqdm_mininterval", 1.0)
+    tqdm_miniters = get_config_value(train_config, "tqdm_miniters", 10)
     checkpoint_dir = get_config_value(train_config, "checkpoint_dir", "models/classification")
     log_dir = get_config_value(train_config, "log_dir", "logs")
     early_stopping_patience = get_config_value(train_config, "early_stopping_patience", 10)
@@ -130,9 +149,14 @@ def train_classifier(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         mixed_precision=mixed_precision,
+        amp_dtype=("bf16" if use_bf16 else "fp16"),
         checkpoint_dir=checkpoint_dir,
         log_dir=log_dir,
         early_stopping_patience=early_stopping_patience,
+        allow_tf32=allow_tf32,
+        use_channels_last=use_channels_last,
+        tqdm_mininterval=tqdm_mininterval,
+        tqdm_miniters=tqdm_miniters,
     )
     
     # Train
@@ -151,8 +175,10 @@ def train_classifier(
 
         with torch.no_grad():
             for images, labels in test_loader:
-                images = images.to(device)
-                labels = labels.to(device)
+                images = images.to(device, non_blocking=True)
+                if use_channels_last:
+                    images = images.to(memory_format=torch.channels_last)
+                labels = labels.to(device, non_blocking=True)
 
                 outputs = model(images)
                 loss = criterion(outputs, labels)
